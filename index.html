@@ -12,7 +12,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- FIREBASE COMPAT LIBRARIES (More robust for local execution) -->
+    <!-- FIREBASE COMPAT LIBRARIES -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
@@ -67,6 +67,47 @@
             border: 1px solid rgba(255, 255, 255, 0.08);
         }
         .touch-target { min-height: 48px; }
+        /* Select styling fix */
+        select {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            background-size: 1em;
+        }
+        /* Custom Checkbox */
+        .custom-checkbox {
+            appearance: none;
+            background-color: rgba(30, 41, 59, 0.5);
+            margin: 0;
+            font: inherit;
+            color: currentColor;
+            width: 1.25em;
+            height: 1.25em;
+            border: 2px solid #475569;
+            border-radius: 0.25em;
+            display: grid;
+            place-content: center;
+            transition: all 0.2s;
+        }
+        .custom-checkbox::before {
+            content: "";
+            width: 0.65em;
+            height: 0.65em;
+            transform: scale(0);
+            transition: 120ms transform ease-in-out;
+            box-shadow: inset 1em 1em white;
+            transform-origin: center;
+            clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+        }
+        .custom-checkbox:checked {
+            background-color: #EAB308; /* gold-500 */
+            border-color: #EAB308;
+        }
+        .custom-checkbox:checked::before {
+            transform: scale(1);
+        }
     </style>
 </head>
 <body class="antialiased min-h-screen pb-24 relative selection:bg-gold-500/30 selection:text-gold-200">
@@ -99,9 +140,47 @@
         </div>
     </div>
 
+    <!-- Video Confirmation Modal -->
+    <div id="video-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[60] flex items-center justify-center hidden p-4 transition-opacity duration-300">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-slide-up relative">
+            <button onclick="closeVideoModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-6 h-6"></i>
+            </button>
+            
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-gold-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i data-lucide="video" class="w-8 h-8 text-gold-500"></i>
+                </div>
+                <h3 class="text-xl font-bold text-white mb-2">Checklist Avant Envoi</h3>
+                <p class="text-sm text-slate-400">Validez ces points pour confirmer l'envoi.</p>
+            </div>
+
+            <div class="space-y-4 mb-8">
+                <label class="flex gap-3 items-start cursor-pointer group">
+                    <input type="checkbox" class="custom-checkbox mt-1 video-check" onchange="checkModalValidity()">
+                    <span class="text-sm text-slate-300 leading-snug group-hover:text-white transition-colors">J'ai visionné ma vidéo et je l'ai auto-validée avant de la soumettre.</span>
+                </label>
+                <label class="flex gap-3 items-start cursor-pointer group">
+                    <input type="checkbox" class="custom-checkbox mt-1 video-check" onchange="checkModalValidity()">
+                    <span class="text-sm text-slate-300 leading-snug group-hover:text-white transition-colors">Je ne valide qu'une seule vidéo à la fois.</span>
+                </label>
+                <label class="flex gap-3 items-start cursor-pointer group">
+                    <input type="checkbox" class="custom-checkbox mt-1 video-check" onchange="checkModalValidity()">
+                    <span class="text-sm text-slate-300 leading-snug group-hover:text-white transition-colors">J'ai activé le métronome sur la tab interactive.</span>
+                </label>
+            </div>
+
+            <button id="confirm-video-btn" onclick="confirmVideoSubmission()" disabled 
+                class="w-full bg-gold-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-900 font-bold py-4 rounded-xl transition-all transform active:scale-[0.98] touch-target flex items-center justify-center gap-2">
+                <span>Confirmer l'envoi</span>
+                <i data-lucide="send" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </div>
+
     <!-- MAIN SCRIPT -->
     <script>
-        // --- FIREBASE INIT (COMPAT MODE) ---
+        // --- FIREBASE INIT ---
         const firebaseConfig = {
             apiKey: "AIzaSyAgeW7QVjF8YXqSdplaHmP0OK9j1N7FT9w",
             authDomain: "protocole-pro.firebaseapp.com",
@@ -111,15 +190,11 @@
             appId: "1:67866296862:web:aa7e6003b317e45e41a40f"
         };
 
-        // Initialize safely
         try {
             firebase.initializeApp(firebaseConfig);
-            console.log("Firebase initialized successfully");
         } catch(e) {
-            console.error("Firebase init error:", e);
-            alert("Erreur de connexion à la base de données. Vérifiez votre connexion internet.");
+            console.error(e);
         }
-
         const db = firebase.firestore();
 
         // --- CONSTANTS & STATE ---
@@ -128,75 +203,146 @@
         const LOCAL_ADMIN_KEY = "gia_is_admin";
 
         let state = {
+            view: 'dashboard', 
+            adminTab: 'students',
+            
             currentStudentId: localStorage.getItem(LOCAL_ID_KEY),
             studentData: null,
             isAdmin: localStorage.getItem(LOCAL_ADMIN_KEY) === 'true',
+            
             allStudents: [],
+            availableStudies: [],
+            
+            pendingStepId: null, // For video confirmation
+            
             unsubscribeStudent: null,
-            unsubscribeList: null
+            unsubscribeList: null,
+            unsubscribeSettings: null
         };
 
         // --- CORE FUNCTIONS ---
 
         function init() {
-            console.log("App starting...");
-            render(); 
-
             if (state.isAdmin) {
-                subscribeToAllStudents();
-            } else if (state.currentStudentId) {
-                subscribeToStudent(state.currentStudentId);
+                state.view = 'admin';
+            } else {
+                state.view = 'dashboard';
             }
+
+            subscribeToAllStudents();
+            subscribeToSettings();
+            
+            if (state.currentStudentId) {
+                checkLocalStudent();
+            }
+
+            render();
         }
 
         // --- FIREBASE LISTENERS ---
 
-        function subscribeToStudent(id) {
-            if (state.unsubscribeStudent) state.unsubscribeStudent();
-            
-            console.log("Subscribing to student:", id);
-            state.unsubscribeStudent = db.collection("students").doc(id).onSnapshot((doc) => {
+        function subscribeToSettings() {
+            if (state.unsubscribeSettings) state.unsubscribeSettings();
+            state.unsubscribeSettings = db.collection('settings').doc('general').onSnapshot(doc => {
                 if (doc.exists) {
-                    state.studentData = { id: doc.id, ...doc.data() };
-                    render();
+                    state.availableStudies = doc.data().studies || [];
                 } else {
-                    console.warn("Student doc not found, resetting.");
-                    localStorage.removeItem(LOCAL_ID_KEY);
-                    state.currentStudentId = null;
-                    state.studentData = null;
-                    render();
+                    db.collection('settings').doc('general').set({
+                        studies: ["Étude Technique 1", "Morceau Libre"]
+                    });
                 }
-            }, (error) => {
-                console.error("Error subscribing to student:", error);
+                render();
             });
         }
 
         function subscribeToAllStudents() {
             if (state.unsubscribeList) state.unsubscribeList();
-
-            console.log("Subscribing to all students");
             state.unsubscribeList = db.collection("students").orderBy("lastUpdated", "desc").onSnapshot((snapshot) => {
                 state.allStudents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 render();
-            }, (error) => {
-                console.error("Error fetching students:", error);
-                if (error.code === 'permission-denied') {
-                    alert("Erreur de permission. Les règles de la base de données bloquent l'accès.");
+            });
+        }
+
+        function checkLocalStudent() {
+            if (!state.currentStudentId) return;
+            db.collection("students").doc(state.currentStudentId).get().then(doc => {
+                if (doc.exists) {
+                    state.studentData = { id: doc.id, ...doc.data() };
+                } else {
+                    localStorage.removeItem(LOCAL_ID_KEY);
+                    state.currentStudentId = null;
+                    state.studentData = null;
+                }
+                render();
+            });
+        }
+
+        function subscribeToStudent(id) {
+            if (state.unsubscribeStudent) state.unsubscribeStudent();
+            state.unsubscribeStudent = db.collection("students").doc(id).onSnapshot((doc) => {
+                if (doc.exists) {
+                    state.studentData = { id: doc.id, ...doc.data() };
+                    render();
                 }
             });
         }
 
-        // --- ACTIONS ---
+        // --- ACTIONS: NAVIGATION ---
+
+        window.goToDashboard = () => {
+            state.view = 'dashboard';
+            render();
+        };
+
+        window.goToCreate = () => {
+            state.view = 'create';
+            render();
+        };
+
+        window.goToMyProfile = () => {
+            if (state.currentStudentId) {
+                // If we have an ID, load it
+                state.view = 'profile';
+                subscribeToStudent(state.currentStudentId);
+            } else {
+                goToCreate();
+            }
+        };
+
+        window.selectStudentFromDashboard = (id) => {
+            // "Reprendre en cours" logic
+            state.currentStudentId = id;
+            localStorage.setItem(LOCAL_ID_KEY, id); // Auto-login on this device
+            state.view = 'profile';
+            subscribeToStudent(id);
+            render();
+        };
+        
+        window.adminViewStudentProfile = (id) => {
+            // Admin just viewing, not logging in as student
+            state.studentData = state.allStudents.find(s => s.id === id);
+            // We use the same view but keep isAdmin true
+            state.view = 'profile';
+            // We subscribe to keep it live
+            subscribeToStudent(id);
+            render();
+        }
+
+        window.returnToAdmin = () => {
+            state.view = 'admin';
+            state.studentData = null;
+            if(state.unsubscribeStudent) state.unsubscribeStudent();
+            render();
+        }
+
+        // --- ACTIONS: DATA ---
 
         window.generatePlan = async function() {
-            console.log("Generate Plan clicked");
             try {
-                const getVal = (id) => {
-                    const el = document.getElementById(id);
-                    return el ? el.value : '';
-                };
+                const getVal = (id) => document.getElementById(id)?.value || '';
                 
                 const name = getVal('input-name');
+                const study = getVal('input-study'); 
                 const measureStart = getVal('input-m-start');
                 const beatStart = getVal('input-b-start');
                 const measureEnd = getVal('input-m-end');
@@ -204,15 +350,12 @@
                 const zero = parseInt(getVal('input-zero'));
                 const rupture = parseInt(getVal('input-rupture'));
 
-                console.log("Inputs:", { name, measureStart, zero, rupture });
-
-                // Strict Validation
                 if (!name) { alert("Veuillez entrer votre nom."); return; }
-                if (!measureStart || !measureEnd) { alert("Veuillez définir la séquence (mesures)."); return; }
-                if (isNaN(zero) || isNaN(rupture)) { alert("Veuillez entrer les objectifs BPM."); return; }
+                if (!study) { alert("Veuillez sélectionner l'étude travaillée."); return; }
+                if (!measureStart || !measureEnd) { alert("Veuillez définir la séquence."); return; }
+                if (isNaN(zero) || isNaN(rupture)) { alert("Veuillez entrer les BPM."); return; }
                 if (rupture <= zero) { alert("Le BPM de rupture doit être supérieur au Point Zéro."); return; }
 
-                // Plan Generation Logic
                 const gap = rupture - zero;
                 const durationDays = gap > 20 ? 10 : 7;
                 const newPlan = [];
@@ -224,7 +367,6 @@
                     return d.toISOString();
                 };
 
-                // Step 1: Zero
                 newPlan.push({
                     id: 'step-zero',
                     status: 'active',
@@ -235,7 +377,6 @@
                     completedDate: null
                 });
 
-                // Step 2: Rupture
                 newPlan.push({
                     id: 'step-rupture',
                     status: 'locked',
@@ -246,7 +387,6 @@
                     completedDate: null
                 });
 
-                // Progression
                 for (let i = 1; i <= durationDays; i++) {
                     const progress = i / durationDays;
                     const targetBpm = Math.round(zero + (gap * progress));
@@ -261,7 +401,6 @@
                     });
                 }
 
-                // Optimization
                 newPlan.push({
                     id: 'step-opti',
                     status: 'locked',
@@ -273,6 +412,7 @@
 
                 const studentPayload = {
                     name,
+                    study,
                     segment: `Mesure ${measureStart} (t.${beatStart}) à Mesure ${measureEnd} (t.${beatEnd})`,
                     bpmZero: zero,
                     bpmRupture: rupture,
@@ -281,60 +421,95 @@
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 };
 
-                console.log("Payload ready, sending to Firestore...");
                 const docRef = await db.collection("students").add(studentPayload);
-                console.log("Document written with ID: ", docRef.id);
                 
                 localStorage.setItem(LOCAL_ID_KEY, docRef.id);
                 state.currentStudentId = docRef.id;
                 
-                subscribeToStudent(docRef.id);
+                selectStudentFromDashboard(docRef.id);
 
             } catch (err) {
-                console.error("Error in generatePlan:", err);
-                alert("Erreur lors de la création: " + err.message);
+                console.error(err);
+                alert("Erreur création: " + err.message);
             }
         };
 
-        window.submitVideo = async function(stepId) {
-            if (!state.studentData) return;
+        window.deleteStudent = async (id, name) => {
+            if (confirm(`⚠️ ATTENTION\n\nVoulez-vous vraiment supprimer définitivement la fiche de ${name} ?\n\nCette action est irréversible.`)) {
+                try {
+                    await db.collection("students").doc(id).delete();
+                    
+                    // Si l'élève supprimé était celui en cache localement, on nettoie
+                    if (state.currentStudentId === id) {
+                         localStorage.removeItem(LOCAL_ID_KEY);
+                         state.currentStudentId = null;
+                         state.studentData = null;
+                    }
+                } catch (e) {
+                    alert("Erreur lors de la suppression: " + e.message);
+                }
+            }
+        };
 
+        // --- VIDEO CONFIRMATION LOGIC ---
+
+        window.openVideoConfirmation = (stepId) => {
+            state.pendingStepId = stepId;
+            const modal = document.getElementById('video-modal');
+            modal.classList.remove('hidden');
+            
+            // Reset checkboxes
+            const checks = document.querySelectorAll('.video-check');
+            checks.forEach(c => c.checked = false);
+            document.getElementById('confirm-video-btn').disabled = true;
+        };
+
+        window.closeVideoModal = () => {
+            document.getElementById('video-modal').classList.add('hidden');
+            state.pendingStepId = null;
+        };
+
+        window.checkModalValidity = () => {
+            const checks = document.querySelectorAll('.video-check');
+            const allChecked = Array.from(checks).every(c => c.checked);
+            document.getElementById('confirm-video-btn').disabled = !allChecked;
+        };
+
+        window.confirmVideoSubmission = async () => {
+            if (!state.pendingStepId || !state.studentData) return;
+            
+            const stepId = state.pendingStepId;
             const updatedPlan = state.studentData.plan.map(step => {
                 if (step.id === stepId) {
-                    const text = `Salut François ! 👋\n\nJ'ai envoyé ma vidéo pour l'étape : *${step.label}*.\n\n👤 Élève : ${state.studentData.name}\n🎼 Séquence : ${state.studentData.segment}`;
-                    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-                    
                     return { ...step, status: 'pending' };
                 }
                 return step;
             });
 
-            try {
-                await db.collection("students").doc(state.currentStudentId).update({
-                    plan: updatedPlan,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            } catch(e) {
-                alert("Erreur de connexion: " + e.message);
-            }
+            await db.collection("students").doc(state.studentData.id).update({
+                plan: updatedPlan,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            closeVideoModal();
         };
 
         window.adminValidateStep = async function(studentId, stepIndex) {
             if (!state.isAdmin) return;
+            // If we are in 'profile' view looking at a student, get data from state
+            // If in dashboard, find in list
+            let student = state.allStudents.find(s => s.id === studentId);
+            if (!student && state.studentData && state.studentData.id === studentId) student = state.studentData;
             
-            const student = state.allStudents.find(s => s.id === studentId);
             if (!student) return;
 
             const updatedPlan = [...student.plan];
-            
-            // Complete current
             updatedPlan[stepIndex] = {
                 ...updatedPlan[stepIndex],
                 status: 'completed',
                 completedDate: new Date().toISOString()
             };
 
-            // Unlock next
             if (stepIndex + 1 < updatedPlan.length) {
                 updatedPlan[stepIndex + 1] = {
                     ...updatedPlan[stepIndex + 1],
@@ -348,18 +523,29 @@
             });
         };
 
-        window.resetApp = function() {
-            if (state.isAdmin) return;
-            if (confirm("Voulez-vous quitter ce profil élève ?")) {
-                localStorage.removeItem(LOCAL_ID_KEY);
-                state.currentStudentId = null;
-                state.studentData = null;
-                if (state.unsubscribeStudent) state.unsubscribeStudent();
-                render();
-            }
+        // --- ADMIN SETTINGS LOGIC ---
+        
+        window.switchAdminTab = (tab) => {
+            state.adminTab = tab;
+            render();
         };
 
-        // --- ADMIN HELPERS ---
+        window.addStudy = async () => {
+            const val = document.getElementById('new-study-input').value;
+            if (!val) return;
+            const newStudies = [...state.availableStudies, val];
+            await db.collection('settings').doc('general').update({ studies: newStudies });
+            document.getElementById('new-study-input').value = '';
+        };
+
+        window.removeStudy = async (study) => {
+            if(!confirm(`Supprimer "${study}" ?`)) return;
+            const newStudies = state.availableStudies.filter(s => s !== study);
+            await db.collection('settings').doc('general').update({ studies: newStudies });
+        };
+
+        // --- LOGIN/AUTH ---
+
         window.toggleAdminModal = (show) => {
             const el = document.getElementById('admin-modal');
             if (show) {
@@ -375,9 +561,9 @@
             const val = document.getElementById('admin-input').value;
             if (val === ADMIN_CODE) {
                 state.isAdmin = true;
+                state.view = 'admin';
                 localStorage.setItem(LOCAL_ADMIN_KEY, 'true');
                 window.toggleAdminModal(false);
-                subscribeToAllStudents();
                 render();
             } else {
                 alert("Code incorrect");
@@ -386,10 +572,17 @@
 
         window.logoutAdmin = () => {
             state.isAdmin = false;
+            state.view = 'dashboard';
             localStorage.setItem(LOCAL_ADMIN_KEY, 'false');
-            if (state.unsubscribeList) state.unsubscribeList();
-            if (state.currentStudentId) subscribeToStudent(state.currentStudentId);
             render();
+        };
+
+        window.exitStudentProfile = () => {
+            if (state.isAdmin) {
+                returnToAdmin();
+            } else {
+                goToDashboard();
+            }
         };
 
         // --- RENDER ---
@@ -398,268 +591,380 @@
             const app = document.getElementById('app');
             if (!app) return;
 
-            if (state.isAdmin) {
+            if (state.view === 'admin') {
                 renderAdminDashboard(app);
-            } else {
-                renderStudentView(app);
+            } else if (state.view === 'dashboard') {
+                renderPublicDashboard(app);
+            } else if (state.view === 'create') {
+                renderCreationForm(app);
+            } else if (state.view === 'profile') {
+                renderStudentProfile(app);
             }
             
             if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // --- RENDERERS ---
+
+        function renderPublicDashboard(container) {
+            let html = `
+                <header class="bg-slate-900 sticky top-0 z-40 border-b border-slate-800 p-4 flex justify-between items-center shadow-md">
+                    <div class="flex items-center gap-2">
+                        <div class="w-8 h-8 bg-gradient-to-br from-gold-400 to-gold-600 rounded-lg flex items-center justify-center">
+                            <span class="font-bold text-slate-900">P</span>
+                        </div>
+                        <h1 class="text-white font-bold text-lg">Protocole PRO</h1>
+                    </div>
+                    <button onclick="toggleAdminModal(true)" class="text-slate-500 hover:text-white transition-colors">
+                        <i data-lucide="shield" class="w-5 h-5"></i>
+                    </button>
+                </header>
+                
+                <main class="p-4 flex-grow space-y-6">
+                    <div class="text-center py-4 space-y-2">
+                        <h2 class="text-2xl font-bold text-white">Suivi de la Communauté</h2>
+                        <p class="text-slate-400 text-sm">Cliquez sur votre fiche pour reprendre.</p>
+                    </div>
+
+                    <!-- ACTION BUTTON -->
+                    <div class="flex justify-center">
+                        <button onclick="${state.currentStudentId ? 'goToMyProfile()' : 'goToCreate()'}" 
+                            class="bg-gradient-to-r from-gold-400 to-gold-600 hover:from-gold-300 hover:to-gold-500 text-slate-900 font-bold py-4 px-8 rounded-full shadow-lg shadow-gold-500/20 transform transition hover:scale-105 active:scale-95 flex items-center gap-3">
+                            <i data-lucide="${state.currentStudentId ? 'play-circle' : 'plus-circle'}" class="w-5 h-5"></i>
+                            ${state.currentStudentId ? 'Reprendre ma session' : 'Nouvel Élève'}
+                        </button>
+                    </div>
+
+                    <!-- LIST -->
+                    <div class="grid gap-3">
+            `;
+
+            if (state.allStudents.length === 0) {
+                html += `<div class="text-slate-600 text-center py-10 italic">Aucun suivi actif pour le moment.</div>`;
+            } else {
+                state.allStudents.forEach(s => {
+                    const activeStep = s.plan.find(p => p.status === 'active' || p.status === 'pending');
+                    const progress = Math.round((s.plan.filter(p => p.status === 'completed').length / s.plan.length) * 100);
+                    
+                    html += `
+                        <div onclick="selectStudentFromDashboard('${s.id}')" class="bg-slate-800/60 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800 hover:border-gold-500/30 transition-all cursor-pointer group">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="font-bold text-white text-lg group-hover:text-gold-400 transition-colors">${s.name}</div>
+                                <div class="text-xs font-mono text-gold-500 bg-gold-500/10 px-2 py-1 rounded border border-gold-500/20">${progress}%</div>
+                            </div>
+                            <div class="text-sm text-slate-300 mb-1 flex items-center gap-1">
+                                <i data-lucide="book-open" class="w-3 h-3 text-slate-500"></i> ${s.study || 'Étude non spécifiée'}
+                            </div>
+                            <div class="text-xs text-slate-500 mb-3">${s.segment}</div>
+                            
+                            <div class="flex items-center gap-2 text-xs">
+                                <span class="w-2 h-2 rounded-full ${activeStep?.status === 'pending' ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}"></span>
+                                <span class="text-slate-400">
+                                    ${activeStep 
+                                        ? (activeStep.status === 'pending' ? 'Attente validation' : activeStep.label) 
+                                        : 'Terminé'}
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            html += `</div></main>`;
+            container.innerHTML = html;
+        }
+
+        function renderCreationForm(container) {
+            let optionsHtml = `<option value="" disabled selected>Sélectionner une étude...</option>`;
+            state.availableStudies.forEach(study => {
+                optionsHtml += `<option value="${study}">${study}</option>`;
+            });
+
+            let html = `
+                <header class="bg-slate-900 sticky top-0 z-40 border-b border-slate-800 p-4 flex items-center gap-4">
+                    <button onclick="goToDashboard()" class="text-slate-400 hover:text-white">
+                        <i data-lucide="arrow-left" class="w-6 h-6"></i>
+                    </button>
+                    <h1 class="text-white font-bold">Initialisation</h1>
+                </header>
+                <div class="p-6 space-y-6 max-w-md mx-auto animate-slide-up">
+                    
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase mb-1.5 ml-1">Identité</label>
+                        <input type="text" id="input-name" placeholder="Votre Prénom" 
+                            class="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-gold-500 focus:outline-none transition-all touch-target">
+                    </div>
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase mb-1.5 ml-1">Étude Travaillée</label>
+                        <div class="relative">
+                            <select id="input-study" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-4 pr-10 py-3 text-white appearance-none focus:border-gold-500 focus:outline-none touch-target">
+                                ${optionsHtml}
+                            </select>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1 ml-1">Si votre étude n'est pas dans la liste, demandez à l'instructeur.</p>
+                    </div>
+
+                    <div class="space-y-3">
+                        <label class="text-xs font-semibold text-slate-400 uppercase ml-1">Séquence Musicale</label>
+                        <div class="grid grid-cols-2 gap-3">
+                            ${renderMeasureInput('Début', 'input-m-start', 'input-b-start')}
+                            ${renderMeasureInput('Fin', 'input-m-end', 'input-b-end')}
+                        </div>
+                    </div>
+
+                    <div class="glass-panel p-5 rounded-2xl space-y-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="activity" class="text-gold-500 w-5 h-5"></i>
+                            <span class="font-bold text-white">Objectifs Tempo</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            ${renderNumberInput('input-zero', 'Point Zéro (100%)', '60')}
+                            ${renderNumberInput('input-rupture', 'Rupture (Max)', '100')}
+                        </div>
+                    </div>
+
+                    <button type="button" onclick="generatePlan()" class="w-full bg-gradient-to-r from-gold-400 to-gold-600 text-slate-900 font-bold py-4 rounded-xl shadow-lg shadow-gold-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 touch-target">
+                        <i data-lucide="play" class="w-5 h-5 fill-slate-900"></i>
+                        Générer le Plan
+                    </button>
+                </div>
+            `;
+            container.innerHTML = html;
+        }
+
+        function renderStudentProfile(container) {
+            const s = state.studentData;
+            if(!s) return; 
+
+            // If isAdmin, we show 'Retour Dashboard Admin', else 'Retour Liste'
+            let backAction = state.isAdmin ? 'returnToAdmin()' : 'goToDashboard()';
+            let backIcon = state.isAdmin ? 'shield' : 'chevron-left';
+
+            let html = `
+                <header class="bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-800/50">
+                    <div class="max-w-md mx-auto px-6 py-4 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <button onclick="${backAction}" class="bg-slate-800 p-2 rounded-lg text-slate-400 hover:text-white mr-1">
+                                <i data-lucide="${backIcon}" class="w-5 h-5"></i>
+                            </button>
+                            <div>
+                                <h1 class="text-sm font-bold text-white tracking-wide">Protocole PRO</h1>
+                                <p class="text-xs text-gold-500 font-medium">${s.name}</p>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+                <main class="flex-grow px-6 py-8 max-w-md mx-auto space-y-6 animate-slide-up">
+                    
+                    <!-- INFO CARD -->
+                    <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-5 border border-slate-700 shadow-xl relative overflow-hidden">
+                        <div class="absolute top-0 right-0 p-4 opacity-10">
+                            <i data-lucide="music" class="w-24 h-24 text-white"></i>
+                        </div>
+                        <div class="relative z-10">
+                            <div class="flex justify-between items-start mb-2">
+                                <h2 class="text-lg font-bold text-white">${s.study || 'Étude Inconnue'}</h2>
+                                <div class="flex items-center gap-2 text-sm text-slate-300 bg-slate-950/50 py-1 px-3 rounded-lg border border-slate-800">
+                                    <span class="text-gold-500 font-mono font-bold">${s.bpmZero}</span>
+                                    <i data-lucide="arrow-right" class="w-3 h-3 text-slate-500"></i>
+                                    <span class="text-gold-500 font-mono font-bold">${s.bpmRupture}</span>
+                                </div>
+                            </div>
+                            <div class="text-xs text-slate-400 flex items-center gap-2">
+                                <i data-lucide="bar-chart-2" class="w-3 h-3"></i> ${s.segment}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TIMELINE -->
+                    <div class="space-y-4">
+            `;
+
+            // Owner is true if ID matches OR if Admin (admin can effectively act as owner if needed, or just validate)
+            // But buttons differ.
+            const isOwner = (state.currentStudentId === s.id && !state.isAdmin);
+
+            s.plan.forEach((step, index) => {
+                const status = step.status;
+                let cardClasses = "relative overflow-hidden rounded-2xl border transition-all duration-300 p-4 ";
+                let iconBg, iconColor, icon, opacity = "opacity-100";
+
+                if (status === 'completed') {
+                    cardClasses += "bg-slate-900 border-green-500/30";
+                    iconBg = "bg-green-500/20";
+                    iconColor = "text-green-500";
+                    icon = "check";
+                    opacity = "opacity-60";
+                } else if (status === 'active' || status === 'pending') {
+                    cardClasses += "bg-slate-800 border-gold-500 shadow-lg shadow-gold-500/10 scale-[1.02] ring-1 ring-gold-500/20";
+                    iconBg = status === 'pending' ? "bg-yellow-500/20" : "bg-gold-500/20";
+                    iconColor = status === 'pending' ? "text-yellow-500" : "text-gold-500";
+                    icon = status === 'pending' ? "clock" : "play-circle";
+                } else {
+                    cardClasses += "bg-slate-900/50 border-slate-800";
+                    iconBg = "bg-slate-800";
+                    iconColor = "text-slate-600";
+                    icon = "lock";
+                    opacity = "opacity-60";
+                }
+
+                const dateObj = new Date(step.targetDate);
+                const dateStr = dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+
+                html += `
+                    <div class="${cardClasses} ${opacity} flex flex-col gap-3">
+                        <div class="flex items-start gap-4">
+                            <div class="flex-shrink-0 w-12 h-12 rounded-xl ${iconBg} ${iconColor} flex items-center justify-center">
+                                <i data-lucide="${icon}" class="w-6 h-6 ${status === 'completed' ? 'stroke-[3]' : ''}"></i>
+                            </div>
+                            <div class="flex-grow min-w-0">
+                                <div class="flex justify-between items-start mb-1">
+                                    <h3 class="font-bold text-slate-200 truncate pr-2">${step.label}</h3>
+                                    <span class="text-[10px] font-bold uppercase tracking-wider ${['completed','active','pending'].includes(status) ? 'text-slate-300' : 'text-slate-600'} border border-slate-700 rounded px-1.5 py-0.5">${dateStr}</span>
+                                </div>
+                                <div class="text-xs text-slate-400 leading-relaxed mb-2">${step.description}</div>
+                            </div>
+                        </div>
+                `;
+
+                // ACTIONS
+                if (status === 'active' && isOwner) {
+                    html += `
+                        <div class="pl-16 animate-fade-in">
+                            <button onclick="openVideoConfirmation('${step.id}')" 
+                               class="w-full bg-slate-200 hover:bg-white text-slate-900 font-bold py-3 rounded-xl text-center shadow-lg shadow-white/10 flex items-center justify-center gap-2 transition-transform active:scale-95 touch-target">
+                                <i data-lucide="check-circle" class="w-5 h-5"></i>
+                                J'ai envoyé la vidéo
+                            </button>
+                        </div>
+                    `;
+                } else if (status === 'pending') {
+                     html += `
+                        <div class="pl-16">
+                            <div class="w-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 font-bold py-3 rounded-xl text-center flex items-center justify-center gap-2 animate-pulse-slow">
+                                <i data-lucide="hourglass" class="w-5 h-5"></i>
+                                En attente du retour...
+                            </div>
+                            ${state.isAdmin ? `
+                                <button onclick="adminValidateStep('${s.id}', ${index})" class="w-full mt-2 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2">
+                                    <i data-lucide="shield-check" class="w-4 h-4"></i> Valider (Admin)
+                                </button>
+                            ` : `<p class="text-[10px] text-center text-slate-500 mt-2">Ne pas envoyer d'autres vidéos en attendant !</p>`}
+                        </div>
+                    `;
+                } else if (state.isAdmin && status === 'active') {
+                    // Admin can see active steps but usually waits for pending. 
+                    // Optional: Admin could force validate an active step.
+                }
+
+                html += `</div>`;
+            });
+
+            html += `</main>`;
+            container.innerHTML = html;
         }
 
         function renderAdminDashboard(container) {
             let html = `
                 <header class="bg-slate-900 sticky top-0 z-40 border-b border-slate-800 p-4 flex justify-between items-center">
                     <h1 class="text-white font-bold flex items-center gap-2">
-                        <i data-lucide="shield-check" class="text-green-500"></i> Admin Dashboard
+                        <i data-lucide="shield-check" class="text-green-500"></i> Admin
                     </h1>
                     <button onclick="logoutAdmin()" class="text-xs text-red-400 hover:text-white border border-red-500/30 px-3 py-1 rounded-full">Quitter</button>
                 </header>
+
+                <!-- TABS -->
+                <div class="flex border-b border-slate-800 bg-slate-900/50">
+                    <button onclick="switchAdminTab('students')" class="flex-1 py-3 text-sm font-bold ${state.adminTab === 'students' ? 'text-gold-500 border-b-2 border-gold-500' : 'text-slate-500 hover:text-white'}">Suivi Élèves</button>
+                    <button onclick="switchAdminTab('settings')" class="flex-1 py-3 text-sm font-bold ${state.adminTab === 'settings' ? 'text-gold-500 border-b-2 border-gold-500' : 'text-slate-500 hover:text-white'}">Paramètres</button>
+                </div>
+
                 <main class="p-4 space-y-4">
             `;
 
-            if (state.allStudents.length === 0) {
-                html += `<div class="text-center text-slate-500 mt-10">Aucun élève enregistré.</div>`;
-            } else {
-                state.allStudents.forEach(s => {
-                    // Current step analysis
-                    const currentStepIndex = s.plan.findIndex(p => p.status === 'active' || p.status === 'pending');
-                    const currentStep = currentStepIndex >= 0 ? s.plan[currentStepIndex] : null;
-                    const pendingAction = s.plan.some(p => p.status === 'pending');
-                    const finished = s.plan.every(p => p.status === 'completed');
+            if (state.adminTab === 'students') {
+                if (state.allStudents.length === 0) {
+                    html += `<div class="text-center text-slate-500 mt-10">Aucun élève.</div>`;
+                } else {
+                    state.allStudents.forEach(s => {
+                        const currentStepIndex = s.plan.findIndex(p => p.status === 'active' || p.status === 'pending');
+                        const currentStep = currentStepIndex >= 0 ? s.plan[currentStepIndex] : null;
+                        const pendingAction = s.plan.some(p => p.status === 'pending');
+                        const finished = s.plan.every(p => p.status === 'completed');
 
-                    html += `
-                        <div class="bg-slate-800 rounded-xl p-4 border ${pendingAction ? 'border-yellow-500/50' : 'border-slate-700'}">
-                            <div class="flex justify-between items-start mb-3">
-                                <div>
-                                    <h2 class="text-lg font-bold text-white">${s.name}</h2>
-                                    <p class="text-xs text-slate-400">${s.segment}</p>
-                                </div>
-                                ${pendingAction 
-                                    ? `<span class="bg-yellow-500/20 text-yellow-500 text-xs px-2 py-1 rounded font-bold animate-pulse">Action Requise</span>` 
-                                    : (finished ? `<span class="bg-green-500/20 text-green-500 text-xs px-2 py-1 rounded font-bold">Terminé</span>` : '')}
-                            </div>
-                            
-                            <div class="bg-slate-900/50 rounded-lg p-3 text-sm">
-                                ${finished 
-                                    ? `<div class="text-green-400 font-medium">Protocole terminé avec succès.</div>` 
-                                    : currentStep 
-                                        ? `
-                                            <div class="text-slate-400 text-xs uppercase mb-1">Étape Actuelle</div>
-                                            <div class="font-medium text-white mb-2">${currentStep.label} ${currentStep.bpm ? `(${currentStep.bpm} BPM)` : ''}</div>
-                                            ${currentStep.status === 'pending' ? `
-                                                <button onclick="adminValidateStep('${s.id}', ${currentStepIndex})" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2">
-                                                    <i data-lucide="check-circle" class="w-4 h-4"></i> Valider et débloquer
-                                                </button>
-                                            ` : '<div class="text-slate-500 text-xs italic">En cours de travail...</div>'}
-                                        ` 
-                                        : '<div class="text-slate-500">En attente de démarrage...</div>'}
-                            </div>
-                        </div>
-                    `;
-                });
-            }
-
-            html += `</main>`;
-            container.innerHTML = html;
-        }
-
-        function renderStudentView(container) {
-            let html = `
-                <header class="bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-800/50">
-                    <div class="max-w-md mx-auto px-6 py-4 flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 bg-gradient-to-br from-gold-400 to-gold-600 rounded-xl flex items-center justify-center shadow-lg shadow-gold-500/10">
-                                <span class="font-bold text-slate-900 text-lg">P</span>
-                            </div>
-                            <div>
-                                <h1 class="text-sm font-bold text-white tracking-wide">Protocole PRO</h1>
-                                ${state.studentData ? `<p class="text-xs text-gold-500 font-medium truncate max-w-[150px]">${state.studentData.name}</p>` : '<p class="text-xs text-slate-500">Suivi de performance</p>'}
-                            </div>
-                        </div>
-                    </div>
-                </header>
-                <main class="flex-grow px-6 py-8">
-            `;
-
-            if (!state.studentData) {
-                // FORM
-                html += `
-                    <div class="space-y-8 animate-fade-in max-w-md mx-auto">
-                        <div class="text-center space-y-2">
-                            <h2 class="text-2xl font-bold text-white">Initialisation</h2>
-                            <p class="text-slate-400 text-sm">Définissons ensemble vos objectifs.</p>
-                        </div>
-                        
-                        <div class="space-y-6">
-                            <div>
-                                <label class="text-xs font-semibold text-slate-400 uppercase mb-1.5 ml-1">Nom de l'élève</label>
-                                <div class="relative">
-                                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <i data-lucide="user" class="h-5 w-5 text-slate-500"></i>
-                                    </div>
-                                    <input type="text" id="input-name" placeholder="Votre nom" 
-                                        class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-3 text-white text-lg focus:border-gold-500 focus:ring-2 focus:ring-gold-500/20 focus:outline-none transition-all touch-target">
-                                </div>
-                            </div>
-
-                            <div class="space-y-3">
-                                <label class="text-xs font-semibold text-slate-400 uppercase ml-1">Séquence Musicale</label>
-                                <div class="grid grid-cols-2 gap-3">
-                                    ${renderMeasureInput('Début', 'input-m-start', 'input-b-start')}
-                                    ${renderMeasureInput('Fin', 'input-m-end', 'input-b-end')}
-                                </div>
-                            </div>
-
-                            <div class="glass-panel p-5 rounded-2xl space-y-4">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <i data-lucide="activity" class="text-gold-500 w-5 h-5"></i>
-                                    <span class="font-bold text-white">Objectifs Tempo</span>
-                                </div>
-                                <div class="grid grid-cols-2 gap-4">
-                                    ${renderNumberInput('input-zero', 'Point Zéro (100%)', '60')}
-                                    ${renderNumberInput('input-rupture', 'Rupture (Max)', '100')}
-                                </div>
-                            </div>
-
-                            <button type="button" onclick="generatePlan()" class="w-full mt-4 bg-gradient-to-r from-gold-400 to-gold-600 text-slate-900 font-bold py-4 rounded-xl shadow-lg shadow-gold-500/20 hover:shadow-gold-500/40 active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-lg touch-target">
-                                <i data-lucide="play" class="w-5 h-5 fill-slate-900"></i>
-                                Générer le Plan
-                            </button>
-                            
-                            <div class="text-center mt-8">
-                                <button onclick="window.toggleAdminModal(true)" class="text-xs text-slate-600 hover:text-slate-400 uppercase tracking-widest font-bold">Accès Instructeur</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            } else {
-                // DASHBOARD
-                const s = state.studentData;
-                const allCompleted = s.plan.every(step => step.status === 'completed');
-
-                html += `
-                    <div class="max-w-md mx-auto space-y-6 animate-slide-up">
-                        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-5 border border-slate-700 shadow-xl relative overflow-hidden">
-                            <div class="absolute top-0 right-0 p-4 opacity-10">
-                                <i data-lucide="music" class="w-24 h-24 text-white"></i>
-                            </div>
-                            <div class="relative z-10">
-                                <div class="flex justify-between items-start">
-                                    <div>
-                                        <h2 class="text-lg font-bold text-white mb-1">Session Active</h2>
-                                        <div class="flex items-center gap-2 text-sm text-slate-300 bg-slate-950/50 py-1 px-3 rounded-lg inline-flex border border-slate-800">
-                                            <span class="text-gold-500 font-mono font-bold">${s.bpmZero}</span>
-                                            <i data-lucide="arrow-right" class="w-3 h-3 text-slate-500"></i>
-                                            <span class="text-gold-500 font-mono font-bold">${s.bpmRupture} BPM</span>
-                                        </div>
-                                    </div>
-                                    <button onclick="resetApp()" class="p-2 bg-slate-800/80 hover:bg-red-500/20 hover:text-red-400 text-slate-400 rounded-lg transition-all border border-slate-700">
-                                        <i data-lucide="log-out" class="w-4 h-4"></i>
-                                    </button>
-                                </div>
-                                <div class="mt-4 pt-4 border-t border-slate-700/50 flex items-center gap-2 text-xs text-slate-400">
-                                    <i data-lucide="bar-chart-2" class="w-4 h-4 text-slate-500"></i>
-                                    <span>${s.segment}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="space-y-4">
-                `;
-
-                s.plan.forEach((step) => {
-                    const status = step.status;
-                    let cardClasses = "relative overflow-hidden rounded-2xl border transition-all duration-300 p-4 ";
-                    let iconBg, iconColor, icon;
-                    let opacity = "opacity-100";
-
-                    if (status === 'completed') {
-                        cardClasses += "bg-slate-900 border-green-500/30";
-                        iconBg = "bg-green-500/20";
-                        iconColor = "text-green-500";
-                        icon = "check";
-                        opacity = "opacity-60";
-                    } else if (status === 'active' || status === 'pending') {
-                        cardClasses += "bg-slate-800 border-gold-500 shadow-lg shadow-gold-500/10 scale-[1.02] ring-1 ring-gold-500/20";
-                        iconBg = status === 'pending' ? "bg-yellow-500/20" : "bg-gold-500/20";
-                        iconColor = status === 'pending' ? "text-yellow-500" : "text-gold-500";
-                        icon = status === 'pending' ? "clock" : "play-circle";
-                    } else {
-                        cardClasses += "bg-slate-900/50 border-slate-800";
-                        iconBg = "bg-slate-800";
-                        iconColor = "text-slate-600";
-                        icon = "lock";
-                        opacity = "opacity-60";
-                    }
-
-                    const dateObj = new Date(step.targetDate);
-                    const dateStr = dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-
-                    html += `
-                        <div class="${cardClasses} ${opacity} flex flex-col gap-3">
-                            <div class="flex items-start gap-4">
-                                <div class="flex-shrink-0 w-12 h-12 rounded-xl ${iconBg} ${iconColor} flex items-center justify-center">
-                                    <i data-lucide="${icon}" class="w-6 h-6 ${status === 'completed' ? 'stroke-[3]' : ''}"></i>
-                                </div>
-
-                                <div class="flex-grow min-w-0">
-                                    <div class="flex justify-between items-start mb-1">
-                                        <h3 class="font-bold text-slate-200 truncate pr-2">${step.label}</h3>
-                                        <span class="text-[10px] font-bold uppercase tracking-wider ${status === 'completed' || status === 'active' || status === 'pending' ? 'text-slate-300' : 'text-slate-600'} border border-slate-700 rounded px-1.5 py-0.5">${dateStr}</span>
-                                    </div>
-                                    <div class="text-xs text-slate-400 leading-relaxed mb-2">${step.description}</div>
-                                </div>
-                            </div>
-                    `;
-
-                    if (status === 'active') {
                         html += `
-                            <div class="pl-16 animate-fade-in">
-                                <button onclick="submitVideo('${step.id}')" 
-                                   class="w-full bg-[#25D366] hover:bg-[#1fb855] text-slate-950 font-bold py-3 rounded-xl text-center shadow-lg shadow-green-900/20 flex items-center justify-center gap-2 transition-transform active:scale-95 touch-target">
-                                    <i data-lucide="video" class="w-5 h-5"></i>
-                                    J'ai envoyé la vidéo
+                            <div class="bg-slate-800 rounded-xl p-4 border ${pendingAction ? 'border-yellow-500/50' : 'border-slate-700'} relative group">
+                                <button onclick="deleteStudent('${s.id}', '${s.name.replace(/'/g, "\\'")}')" class="absolute top-2 right-2 p-2 text-slate-600 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-all" title="Supprimer la fiche">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
                                 </button>
-                            </div>
-                        `;
-                    } else if (status === 'pending') {
-                        html += `
-                            <div class="pl-16">
-                                <div class="w-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 font-bold py-3 rounded-xl text-center flex items-center justify-center gap-2 animate-pulse-slow">
-                                    <i data-lucide="hourglass" class="w-5 h-5"></i>
-                                    En attente du retour...
+
+                                <div class="flex justify-between items-start mb-2 pr-8">
+                                    <div>
+                                        <h2 class="text-lg font-bold text-white">${s.name}</h2>
+                                        <p class="text-xs text-slate-400">${s.study || '?'}</p>
+                                    </div>
+                                    <div class="flex flex-col items-end gap-1">
+                                        ${pendingAction 
+                                            ? `<span class="bg-yellow-500/20 text-yellow-500 text-xs px-2 py-1 rounded font-bold animate-pulse">Action Requise</span>` 
+                                            : (finished ? `<span class="bg-green-500/20 text-green-500 text-xs px-2 py-1 rounded font-bold">Terminé</span>` : '')}
+                                        <button onclick="adminViewStudentProfile('${s.id}')" class="text-xs text-sky-400 hover:text-sky-300 underline mt-1">Voir Fiche</button>
+                                    </div>
                                 </div>
-                                <p class="text-[10px] text-center text-slate-500 mt-2">Ne pas envoyer d'autres vidéos en attendant !</p>
+                                <p class="text-xs text-slate-500 mb-3">${s.segment}</p>
+                                
+                                <div class="bg-slate-900/50 rounded-lg p-3 text-sm">
+                                    ${finished 
+                                        ? `<div class="text-green-400 font-medium">Terminé.</div>` 
+                                        : currentStep 
+                                            ? `
+                                                <div class="text-slate-400 text-xs uppercase mb-1">Étape Actuelle</div>
+                                                <div class="font-medium text-white mb-2">${currentStep.label} ${currentStep.bpm ? `(${currentStep.bpm} BPM)` : ''}</div>
+                                                ${currentStep.status === 'pending' ? `
+                                                    <button onclick="adminValidateStep('${s.id}', ${currentStepIndex})" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2">
+                                                        <i data-lucide="check-circle" class="w-4 h-4"></i> Valider et débloquer
+                                                    </button>
+                                                ` : '<div class="text-slate-500 text-xs italic">En cours de travail...</div>'}
+                                            ` 
+                                            : '<div>Erreur état</div>'}
+                                </div>
                             </div>
                         `;
-                    }
-
-                    html += `</div>`;
-                });
-
-                if (allCompleted) {
-                    html += `
-                        <div class="p-8 bg-gradient-to-br from-gold-400 to-gold-600 rounded-3xl text-center shadow-2xl shadow-gold-500/30 animate-slide-up transform scale-105 my-8">
-                            <div class="bg-white/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
-                                <i data-lucide="award" class="w-8 h-8 text-white"></i>
-                            </div>
-                            <h3 class="text-2xl font-black text-slate-900 mb-2 uppercase tracking-wide">Félicitations !</h3>
-                            <p class="text-slate-900/80 font-medium leading-relaxed">
-                                Le protocole est terminé.<br>Le segment est maîtrisé.
-                            </p>
-                        </div>
-                    `;
+                    });
                 }
+            } else {
+                // SETTINGS TAB
+                html += `
+                    <div class="space-y-6">
+                        <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                            <h3 class="text-white font-bold mb-4 flex items-center gap-2">
+                                <i data-lucide="book" class="w-5 h-5 text-gold-500"></i> Gestion des Études
+                            </h3>
+                            
+                            <div class="flex gap-2 mb-4">
+                                <input type="text" id="new-study-input" placeholder="Nom de l'étude (ex: Op. 10 n°3)" class="flex-grow bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:border-gold-500 focus:outline-none">
+                                <button onclick="addStudy()" class="bg-gold-500 hover:bg-gold-400 text-slate-900 font-bold px-4 py-2 rounded-lg text-sm">Ajouter</button>
+                            </div>
 
-                html += `</div></div>`;
+                            <ul class="space-y-2">
+                                ${state.availableStudies.map(study => `
+                                    <li class="flex justify-between items-center bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                                        <span class="text-sm text-slate-300">${study}</span>
+                                        <button onclick="removeStudy('${study.replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-300 p-1">
+                                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                        </button>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                `;
             }
 
             html += `</main>`;
             container.innerHTML = html;
         }
 
-        // Helpers
         function renderNumberInput(id, label, placeholder = "0") {
             return `
                 <div class="flex flex-col">
@@ -690,7 +995,9 @@
             `;
         }
 
+        // Start
         init();
+
     </script>
 </body>
 </html>
