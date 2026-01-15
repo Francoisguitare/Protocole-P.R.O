@@ -1,44 +1,403 @@
 <!DOCTYPE html>
 <html lang="fr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GIA : Le Verrou P.R.O.</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
     <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-              mono: ['JetBrains Mono', 'monospace'],
-            },
-            colors: {
-              gold: {
-                400: '#FFD700',
-                500: '#DAA520',
-                600: '#B8860B',
-              }
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        gold: {
+                            400: '#FFD700',
+                            500: '#DAA520',
+                            600: '#B8860B',
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        }
+                    }
+                }
             }
-          }
         }
-      }
     </script>
-  <script type="importmap">
-{
-  "imports": {
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3"
-  }
-}
-</script>
+    <style>
+        body { background-color: #0a0a0a; color: #e5e7eb; }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #444; }
+    </style>
 </head>
-  <body class="bg-neutral-950 text-gray-200 antialiased">
-    <div id="root"></div>
-  </body>
+<body class="antialiased min-h-screen pb-20 relative selection:bg-gold-500 selection:text-black">
+
+    <div id="app"></div>
+
+    <!-- Admin Modal (Hidden by default) -->
+    <div id="admin-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-neutral-900 border border-neutral-700 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-fade-in">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="lock" class="text-gold-500 w-5 h-5"></i>
+                    Déverrouillage
+                </h3>
+                <button onclick="toggleAdminModal(false)" class="text-neutral-500 hover:text-white">✕</button>
+            </div>
+            <form onsubmit="handleAdminLogin(event)" class="space-y-4">
+                <input type="password" id="admin-input" placeholder="Code Instructeur..." class="w-full bg-black border border-neutral-700 rounded-lg p-3 text-white focus:border-gold-500 focus:outline-none text-center tracking-widest font-mono">
+                <button type="submit" class="w-full bg-gold-500 text-black font-bold py-3 rounded-lg hover:bg-gold-400 transition-colors">ACCÉDER</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Script Logic -->
+    <script>
+        // Constants & State
+        const ADMIN_CODE = "GIA15K";
+        const STORAGE_KEY = "gia-verrou-state-v1";
+        
+        let state = {
+            studentName: '',
+            segment: '',
+            bpmZero: '',
+            bpmRupture: '',
+            plan: [],
+            isPlanGenerated: false,
+            isAdmin: false
+        };
+
+        // Initialization
+        window.addEventListener('DOMContentLoaded', () => {
+            loadState();
+            render();
+        });
+
+        function loadState() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    state = JSON.parse(saved);
+                } catch (e) {
+                    console.error("Error loading state", e);
+                }
+            }
+        }
+
+        function saveState() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            render();
+        }
+
+        // Logic Functions
+        function generatePlan() {
+            const name = document.getElementById('input-name').value;
+            const segment = document.getElementById('input-segment').value;
+            const zero = parseInt(document.getElementById('input-zero').value);
+            const rupture = parseInt(document.getElementById('input-rupture').value);
+
+            if (!name || !segment || isNaN(zero) || isNaN(rupture)) {
+                alert("Veuillez remplir tous les champs.");
+                return;
+            }
+
+            state.studentName = name;
+            state.segment = segment;
+            state.bpmZero = zero;
+            state.bpmRupture = rupture;
+
+            const gap = rupture - zero;
+            const durationDays = gap > 20 ? 10 : 7;
+            const newPlan = [];
+
+            // Step 1: Zero
+            newPlan.push({
+                id: 'step-zero',
+                type: 'validation',
+                label: 'Validation Point Zéro (100% Propre)',
+                bpm: zero,
+                completed: false
+            });
+
+            // Step 2: Rupture
+            newPlan.push({
+                id: 'step-rupture',
+                type: 'validation',
+                label: 'Validation Point de Rupture (Crash Test)',
+                bpm: rupture,
+                completed: false
+            });
+
+            // Progression
+            for (let i = 1; i <= durationDays; i++) {
+                const progress = i / durationDays;
+                const targetBpm = Math.round(zero + (gap * progress));
+                newPlan.push({
+                    id: `day-${i}`,
+                    type: 'progression',
+                    label: `Jour ${i} : Progression`,
+                    bpm: targetBpm,
+                    completed: false
+                });
+            }
+
+            // Optimization
+            newPlan.push({
+                id: 'step-opti',
+                type: 'optimisation',
+                label: 'Phase d\'Optimisation & Réintégration',
+                completed: false
+            });
+
+            state.plan = newPlan;
+            state.isPlanGenerated = true;
+            saveState();
+        }
+
+        function resetApp() {
+            if (confirm("Attention : Cela effacera toute la progression actuelle. Continuer ?")) {
+                const isAdmin = state.isAdmin;
+                state = {
+                    studentName: '',
+                    segment: '',
+                    bpmZero: '',
+                    bpmRupture: '',
+                    plan: [],
+                    isPlanGenerated: false,
+                    isAdmin: isAdmin
+                };
+                saveState();
+            }
+        }
+
+        function toggleAdminModal(show) {
+            const modal = document.getElementById('admin-modal');
+            const input = document.getElementById('admin-input');
+            if (show) {
+                modal.classList.remove('hidden');
+                setTimeout(() => input.focus(), 100);
+            } else {
+                modal.classList.add('hidden');
+                input.value = '';
+            }
+        }
+
+        function handleAdminLogin(e) {
+            e.preventDefault();
+            const input = document.getElementById('admin-input').value;
+            if (input === ADMIN_CODE) {
+                state.isAdmin = true;
+                toggleAdminModal(false);
+                saveState();
+            } else {
+                alert("Code incorrect.");
+            }
+        }
+
+        function logoutAdmin() {
+            state.isAdmin = false;
+            saveState();
+        }
+
+        function toggleStep(id) {
+            if (!state.isAdmin) return;
+            const step = state.plan.find(s => s.id === id);
+            if (step) {
+                step.completed = !step.completed;
+                saveState();
+            }
+        }
+
+        function getWhatsAppLink(step) {
+            const bpmText = step.bpm ? ` à ${step.bpm} BPM` : '';
+            const text = `Salut François, voici ma vidéo pour l'étape : ${step.label}${bpmText}. (Élève: ${state.studentName}, Segment: ${state.segment})`;
+            return `https://wa.me/?text=${encodeURIComponent(text)}`;
+        }
+
+        // Render Function
+        function render() {
+            const app = document.getElementById('app');
+            
+            // Header
+            let html = `
+                <header class="border-b border-neutral-800 bg-neutral-900/50 backdrop-blur-md sticky top-0 z-40">
+                    <div class="max-w-md mx-auto px-6 py-4 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-gradient-to-br from-gold-400 to-gold-600 rounded-lg flex items-center justify-center shadow-lg shadow-gold-500/20">
+                                <span class="font-mono font-bold text-black text-lg">GIA</span>
+                            </div>
+                            <div>
+                                <h1 class="text-sm font-bold text-white tracking-wide uppercase">Le Verrou P.R.O.</h1>
+                                ${state.studentName ? `<p class="text-xs text-gold-500 font-mono">${state.studentName}</p>` : ''}
+                            </div>
+                        </div>
+                        ${state.isAdmin ? `
+                            <div class="px-2 py-1 bg-gold-500/10 border border-gold-500/20 rounded text-xs text-gold-500 font-mono flex items-center gap-1">
+                                <i data-lucide="shield" class="w-3 h-3"></i> ADMIN
+                            </div>
+                        ` : ''}
+                    </div>
+                </header>
+                <main class="max-w-md mx-auto px-6 py-8">
+            `;
+
+            // Content
+            if (!state.isPlanGenerated) {
+                // Calibration Form
+                html += `
+                    <div class="space-y-6 animate-fade-in">
+                        <div class="space-y-2 mb-8">
+                            <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                                <i data-lucide="activity" class="text-gold-500"></i> Calibration
+                            </h2>
+                            <p class="text-sm text-gray-500">Configurez les paramètres de votre session.</p>
+                        </div>
+                        
+                        <div class="space-y-4">
+                            <div class="space-y-1">
+                                <label class="text-xs font-mono text-gray-400 uppercase">Nom de l'élève</label>
+                                <input type="text" id="input-name" value="${state.studentName}" placeholder="ex: Jean Dupont" class="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white focus:outline-none focus:border-gold-500 focus:ring-1 focus:ring-gold-500 placeholder:text-neutral-700">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-xs font-mono text-gray-400 uppercase">Segment</label>
+                                <input type="text" id="input-segment" value="${state.segment}" placeholder="ex: Mesure 6 -> 7" class="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white focus:outline-none focus:border-gold-500 focus:ring-1 focus:ring-gold-500 placeholder:text-neutral-700">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="space-y-1">
+                                    <label class="text-xs font-mono text-gray-400 uppercase">Zéro (BPM)</label>
+                                    <input type="number" id="input-zero" value="${state.bpmZero}" placeholder="100" class="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white focus:outline-none focus:border-gold-500 font-mono placeholder:text-neutral-700">
+                                </div>
+                                <div class="space-y-1">
+                                    <label class="text-xs font-mono text-gray-400 uppercase">Rupture (BPM)</label>
+                                    <input type="number" id="input-rupture" value="${state.bpmRupture}" placeholder="120" class="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-white focus:outline-none focus:border-gold-500 font-mono placeholder:text-neutral-700">
+                                </div>
+                            </div>
+                            <button onclick="generatePlan()" class="w-full mt-6 bg-white text-black font-bold py-4 rounded-lg hover:bg-gold-400 transition-colors flex items-center justify-center gap-2 shadow-lg active:scale-95 duration-100">
+                                <i data-lucide="activity" class="w-5 h-5"></i> GÉNÉRER MON PLAN
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Plan View
+                const allCompleted = state.plan.every(s => s.completed);
+
+                html += `
+                    <div class="space-y-6 animate-fade-in">
+                        <div class="flex items-end justify-between mb-2">
+                            <div>
+                                <h2 class="text-xl font-bold text-white">Protocole Actif</h2>
+                                <p class="text-xs text-gold-500 font-mono mt-1">
+                                    ${state.bpmZero} BPM <span class="text-gray-600 mx-1">→</span> ${state.bpmRupture} BPM
+                                </p>
+                            </div>
+                            <button onclick="resetApp()" class="text-neutral-600 hover:text-red-500 transition-colors p-2">
+                                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+
+                        <div class="space-y-3 relative">
+                            <!-- Connecting Line -->
+                            <div class="absolute left-[1.65rem] top-4 bottom-4 w-px bg-neutral-800 -z-10"></div>
+                `;
+
+                // Steps Loop
+                state.plan.forEach((step, index) => {
+                    const previousStep = state.plan[index - 1];
+                    // Logic: Active if not completed AND (first step OR previous step completed)
+                    const isActive = !step.completed && (!previousStep || previousStep.completed);
+                    
+                    const cardClass = step.completed 
+                        ? 'bg-neutral-900/30 border-gold-500/30' 
+                        : isActive 
+                            ? 'bg-neutral-900 border-neutral-700 shadow-md shadow-black/50' 
+                            : 'bg-neutral-900/20 border-neutral-800 opacity-60 grayscale';
+
+                    const checkboxClass = step.completed 
+                        ? 'bg-gold-500 border-gold-500 text-black' 
+                        : state.isAdmin 
+                            ? 'bg-neutral-800 border-neutral-600 hover:border-gold-500 cursor-pointer' 
+                            : 'bg-neutral-900 border-neutral-800 cursor-not-allowed';
+
+                    html += `
+                        <div class="relative flex flex-col gap-3 p-4 rounded-xl border transition-all duration-300 ${cardClass}">
+                            <div class="flex items-start gap-4">
+                                <button onclick="toggleStep('${step.id}')" ${!state.isAdmin ? 'disabled' : ''} class="mt-1 flex-shrink-0 w-6 h-6 rounded border flex items-center justify-center transition-all ${checkboxClass}">
+                                    ${step.completed ? `<i data-lucide="check" class="w-3.5 h-3.5 stroke-[4]"></i>` : ''}
+                                </button>
+
+                                <div class="flex-grow">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <h3 class="font-medium ${step.completed ? 'text-gold-500' : 'text-gray-200'}">${step.label}</h3>
+                                        ${step.bpm ? `<span class="font-mono text-xs font-bold text-neutral-500 bg-neutral-950 px-2 py-1 rounded border border-neutral-800">${step.bpm}</span>` : ''}
+                                    </div>
+                                    
+                                    <div class="flex items-center justify-between mt-3">
+                                        <span class="text-xs ${isActive ? 'text-gold-500/80 animate-pulse' : 'text-neutral-600'}">
+                                            ${step.completed ? 'Validé par Instructeur' : isActive ? 'En attente de validation' : 'Verrouillé'}
+                                        </span>
+                                        ${!step.completed ? `
+                                            <a href="${getWhatsAppLink(step)}" target="_blank" class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all bg-[#25D366] text-black hover:bg-[#1fb855] hover:scale-105 shadow-lg shadow-green-900/20">
+                                                <i data-lucide="send" class="w-3 h-3"></i> Envoyer Vidéo
+                                            </a>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += `</div>`; // End steps container
+
+                // Success Message
+                if (allCompleted) {
+                    html += `
+                        <div class="p-6 mt-6 bg-gradient-to-br from-gold-500/20 to-neutral-900 border border-gold-500/50 rounded-xl text-center animate-fade-in">
+                            <i data-lucide="music" class="w-12 h-12 text-gold-500 mx-auto mb-4"></i>
+                            <h3 class="text-xl font-bold text-white mb-2">Protocole Terminé !</h3>
+                            <p class="text-sm text-gray-300">Le verrou est levé. Vous pouvez réintégrer le segment dans la phrase complète.</p>
+                        </div>
+                    `;
+                }
+
+                html += `</div>`; // End Plan View container
+            }
+
+            html += `</main>`; // End Main
+
+            // Admin Footer
+            html += `
+                <footer class="fixed bottom-0 left-0 w-full p-4 flex justify-center pointer-events-none z-30">
+                    <button onclick="${state.isAdmin ? 'logoutAdmin()' : 'toggleAdminModal(true)'}" class="pointer-events-auto px-4 py-2 rounded-full text-[10px] tracking-widest uppercase font-bold transition-all ${state.isAdmin ? 'bg-red-900/20 text-red-500 hover:bg-red-900/40' : 'text-neutral-800 hover:text-neutral-600'}">
+                        ${state.isAdmin ? 'Quitter Mode Admin' : 'Mode Admin'}
+                    </button>
+                </footer>
+            `;
+
+            app.innerHTML = html;
+            
+            // Re-initialize icons
+            lucide.createIcons();
+        }
+    </script>
+</body>
 </html>
