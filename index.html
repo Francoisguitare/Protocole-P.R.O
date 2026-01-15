@@ -11,6 +11,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- FIREBASE COMPAT LIBRARIES (More robust for local execution) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
     <script>
         tailwind.config = {
             theme: {
@@ -78,11 +83,11 @@
                     </div>
                     Accès Instructeur
                 </h3>
-                <button id="close-admin-modal" class="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-full transition-colors">
+                <button onclick="toggleAdminModal(false)" class="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-full transition-colors">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
-            <form id="admin-form" class="space-y-4">
+            <form onsubmit="handleAdminLogin(event)" class="space-y-4">
                 <div>
                     <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 block">Code Instructeur</label>
                     <input type="password" id="admin-input" placeholder="••••••" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-lg text-center focus:border-gold-500 focus:ring-2 focus:ring-gold-500/20 focus:outline-none transition-all tracking-widest touch-target">
@@ -94,12 +99,9 @@
         </div>
     </div>
 
-    <!-- MAIN MODULE SCRIPT -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDoc, getDocs, doc, updateDoc, onSnapshot, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-        // --- FIREBASE CONFIG ---
+    <!-- MAIN SCRIPT -->
+    <script>
+        // --- FIREBASE INIT (COMPAT MODE) ---
         const firebaseConfig = {
             apiKey: "AIzaSyAgeW7QVjF8YXqSdplaHmP0OK9j1N7FT9w",
             authDomain: "protocole-pro.firebaseapp.com",
@@ -109,8 +111,16 @@
             appId: "1:67866296862:web:aa7e6003b317e45e41a40f"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        // Initialize safely
+        try {
+            firebase.initializeApp(firebaseConfig);
+            console.log("Firebase initialized successfully");
+        } catch(e) {
+            console.error("Firebase init error:", e);
+            alert("Erreur de connexion à la base de données. Vérifiez votre connexion internet.");
+        }
+
+        const db = firebase.firestore();
 
         // --- CONSTANTS & STATE ---
         const ADMIN_CODE = "GIA15K";
@@ -119,17 +129,18 @@
 
         let state = {
             currentStudentId: localStorage.getItem(LOCAL_ID_KEY),
-            studentData: null, // Data of the current student
+            studentData: null,
             isAdmin: localStorage.getItem(LOCAL_ADMIN_KEY) === 'true',
-            allStudents: [], // For admin view
+            allStudents: [],
             unsubscribeStudent: null,
             unsubscribeList: null
         };
 
         // --- CORE FUNCTIONS ---
 
-        async function init() {
-            render(); // Initial render (loading or empty)
+        function init() {
+            console.log("App starting...");
+            render(); 
 
             if (state.isAdmin) {
                 subscribeToAllStudents();
@@ -143,35 +154,47 @@
         function subscribeToStudent(id) {
             if (state.unsubscribeStudent) state.unsubscribeStudent();
             
-            state.unsubscribeStudent = onSnapshot(doc(db, "students", id), (doc) => {
-                if (doc.exists()) {
+            console.log("Subscribing to student:", id);
+            state.unsubscribeStudent = db.collection("students").doc(id).onSnapshot((doc) => {
+                if (doc.exists) {
                     state.studentData = { id: doc.id, ...doc.data() };
                     render();
                 } else {
-                    // Document deleted or invalid ID
+                    console.warn("Student doc not found, resetting.");
                     localStorage.removeItem(LOCAL_ID_KEY);
                     state.currentStudentId = null;
                     state.studentData = null;
                     render();
                 }
+            }, (error) => {
+                console.error("Error subscribing to student:", error);
             });
         }
 
         function subscribeToAllStudents() {
             if (state.unsubscribeList) state.unsubscribeList();
 
-            const q = query(collection(db, "students"), orderBy("lastUpdated", "desc"));
-            state.unsubscribeList = onSnapshot(q, (snapshot) => {
+            console.log("Subscribing to all students");
+            state.unsubscribeList = db.collection("students").orderBy("lastUpdated", "desc").onSnapshot((snapshot) => {
                 state.allStudents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 render();
+            }, (error) => {
+                console.error("Error fetching students:", error);
+                if (error.code === 'permission-denied') {
+                    alert("Erreur de permission. Les règles de la base de données bloquent l'accès.");
+                }
             });
         }
 
         // --- ACTIONS ---
 
         window.generatePlan = async function() {
+            console.log("Generate Plan clicked");
             try {
-                const getVal = (id) => document.getElementById(id)?.value || '';
+                const getVal = (id) => {
+                    const el = document.getElementById(id);
+                    return el ? el.value : '';
+                };
                 
                 const name = getVal('input-name');
                 const measureStart = getVal('input-m-start');
@@ -181,32 +204,34 @@
                 const zero = parseInt(getVal('input-zero'));
                 const rupture = parseInt(getVal('input-rupture'));
 
-                if (!name || !measureStart || !measureEnd || isNaN(zero) || isNaN(rupture) || rupture <= zero) {
-                    alert("Veuillez vérifier toutes les informations.");
-                    return;
-                }
+                console.log("Inputs:", { name, measureStart, zero, rupture });
+
+                // Strict Validation
+                if (!name) { alert("Veuillez entrer votre nom."); return; }
+                if (!measureStart || !measureEnd) { alert("Veuillez définir la séquence (mesures)."); return; }
+                if (isNaN(zero) || isNaN(rupture)) { alert("Veuillez entrer les objectifs BPM."); return; }
+                if (rupture <= zero) { alert("Le BPM de rupture doit être supérieur au Point Zéro."); return; }
 
                 // Plan Generation Logic
                 const gap = rupture - zero;
                 const durationDays = gap > 20 ? 10 : 7;
                 const newPlan = [];
-                const startDate = new Date(); // Start Today
+                const startDate = new Date(); 
 
-                // Helper for date
                 const getDate = (daysToAdd) => {
                     const d = new Date(startDate);
                     d.setDate(d.getDate() + daysToAdd);
-                    return d;
+                    return d.toISOString();
                 };
 
                 // Step 1: Zero
                 newPlan.push({
                     id: 'step-zero',
-                    status: 'active', // 'locked', 'active', 'pending', 'completed'
+                    status: 'active',
                     label: 'Validation Point Zéro',
                     description: `Jouer le segment parfaitement à ${zero} BPM. Aucune tension, fluidité absolue requise.`,
                     bpm: zero,
-                    targetDate: getDate(0).toISOString(),
+                    targetDate: getDate(0),
                     completedDate: null
                 });
 
@@ -217,7 +242,7 @@
                     label: 'Point de Rupture',
                     description: `Monter à ${rupture} BPM. L'objectif est de tenir la vitesse, même si la propreté se dégrade (80% clean).`,
                     bpm: rupture,
-                    targetDate: getDate(0).toISOString(),
+                    targetDate: getDate(0),
                     completedDate: null
                 });
 
@@ -231,7 +256,7 @@
                         label: `Jour ${i}`,
                         description: `Objectif ${targetBpm} BPM. Valider 3 passages propres consécutifs avant d'envoyer la vidéo.`,
                         bpm: targetBpm,
-                        targetDate: getDate(i).toISOString(),
+                        targetDate: getDate(i),
                         completedDate: null
                     });
                 }
@@ -242,7 +267,7 @@
                     status: 'locked',
                     label: 'Optimisation Finale',
                     description: `Réintégrer le segment travaillé dans la phrase musicale complète à ${zero} BPM.`,
-                    targetDate: getDate(durationDays + 1).toISOString(),
+                    targetDate: getDate(durationDays + 1),
                     completedDate: null
                 });
 
@@ -252,22 +277,22 @@
                     bpmZero: zero,
                     bpmRupture: rupture,
                     plan: newPlan,
-                    createdAt: serverTimestamp(),
-                    lastUpdated: serverTimestamp()
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 };
 
-                // Create in Firestore
-                const docRef = await addDoc(collection(db, "students"), studentPayload);
+                console.log("Payload ready, sending to Firestore...");
+                const docRef = await db.collection("students").add(studentPayload);
+                console.log("Document written with ID: ", docRef.id);
                 
-                // Save ID locally
                 localStorage.setItem(LOCAL_ID_KEY, docRef.id);
                 state.currentStudentId = docRef.id;
                 
                 subscribeToStudent(docRef.id);
 
             } catch (err) {
-                console.error(err);
-                alert("Erreur: " + err.message);
+                console.error("Error in generatePlan:", err);
+                alert("Erreur lors de la création: " + err.message);
             }
         };
 
@@ -276,7 +301,6 @@
 
             const updatedPlan = state.studentData.plan.map(step => {
                 if (step.id === stepId) {
-                    // Open WhatsApp
                     const text = `Salut François ! 👋\n\nJ'ai envoyé ma vidéo pour l'étape : *${step.label}*.\n\n👤 Élève : ${state.studentData.name}\n🎼 Séquence : ${state.studentData.segment}`;
                     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
                     
@@ -285,45 +309,47 @@
                 return step;
             });
 
-            await updateDoc(doc(db, "students", state.currentStudentId), {
-                plan: updatedPlan,
-                lastUpdated: serverTimestamp()
-            });
+            try {
+                await db.collection("students").doc(state.currentStudentId).update({
+                    plan: updatedPlan,
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            } catch(e) {
+                alert("Erreur de connexion: " + e.message);
+            }
         };
 
         window.adminValidateStep = async function(studentId, stepIndex) {
             if (!state.isAdmin) return;
             
-            // Need to find the student in state.allStudents to get the plan
             const student = state.allStudents.find(s => s.id === studentId);
             if (!student) return;
 
             const updatedPlan = [...student.plan];
             
-            // Complete current step
+            // Complete current
             updatedPlan[stepIndex] = {
                 ...updatedPlan[stepIndex],
                 status: 'completed',
                 completedDate: new Date().toISOString()
             };
 
-            // Unlock next step if exists
+            // Unlock next
             if (stepIndex + 1 < updatedPlan.length) {
                 updatedPlan[stepIndex + 1] = {
                     ...updatedPlan[stepIndex + 1],
-                    status: 'active',
-                    // Shift date logic could happen here, simpler to just unlock for now
+                    status: 'active'
                 };
             }
 
-            await updateDoc(doc(db, "students", studentId), {
+            await db.collection("students").doc(studentId).update({
                 plan: updatedPlan,
-                lastUpdated: serverTimestamp()
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             });
         };
 
         window.resetApp = function() {
-            if (state.isAdmin) return; // Admin doesn't reset via this button usually
+            if (state.isAdmin) return;
             if (confirm("Voulez-vous quitter ce profil élève ?")) {
                 localStorage.removeItem(LOCAL_ID_KEY);
                 state.currentStudentId = null;
@@ -333,17 +359,18 @@
             }
         };
 
-        // --- ADMIN UI HANDLERS ---
-        
+        // --- ADMIN HELPERS ---
         window.toggleAdminModal = (show) => {
             const el = document.getElementById('admin-modal');
-            if (show) el.classList.remove('hidden');
-            else el.classList.add('hidden');
+            if (show) {
+                el.classList.remove('hidden');
+                setTimeout(() => document.getElementById('admin-input').focus(), 100);
+            } else {
+                el.classList.add('hidden');
+            }
         };
 
-        document.getElementById('close-admin-modal').onclick = () => window.toggleAdminModal(false);
-
-        document.getElementById('admin-form').onsubmit = (e) => {
+        window.handleAdminLogin = (e) => {
             e.preventDefault();
             const val = document.getElementById('admin-input').value;
             if (val === ADMIN_CODE) {
@@ -361,25 +388,22 @@
             state.isAdmin = false;
             localStorage.setItem(LOCAL_ADMIN_KEY, 'false');
             if (state.unsubscribeList) state.unsubscribeList();
-            // Revert to student view if ID exists
             if (state.currentStudentId) subscribeToStudent(state.currentStudentId);
             render();
         };
 
-        // --- RENDER FUNCTIONS ---
+        // --- RENDER ---
 
         function render() {
             const app = document.getElementById('app');
             if (!app) return;
 
-            // Admin View
             if (state.isAdmin) {
                 renderAdminDashboard(app);
-                return;
+            } else {
+                renderStudentView(app);
             }
-
-            // Student View
-            renderStudentView(app);
+            
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
 
@@ -398,9 +422,9 @@
                 html += `<div class="text-center text-slate-500 mt-10">Aucun élève enregistré.</div>`;
             } else {
                 state.allStudents.forEach(s => {
-                    // Find current step
+                    // Current step analysis
                     const currentStepIndex = s.plan.findIndex(p => p.status === 'active' || p.status === 'pending');
-                    const currentStep = s.plan[currentStepIndex];
+                    const currentStep = currentStepIndex >= 0 ? s.plan[currentStepIndex] : null;
                     const pendingAction = s.plan.some(p => p.status === 'pending');
                     const finished = s.plan.every(p => p.status === 'completed');
 
@@ -429,7 +453,7 @@
                                                 </button>
                                             ` : '<div class="text-slate-500 text-xs italic">En cours de travail...</div>'}
                                         ` 
-                                        : '<div>Erreur état</div>'}
+                                        : '<div class="text-slate-500">En attente de démarrage...</div>'}
                             </div>
                         </div>
                     `;
@@ -438,11 +462,9 @@
 
             html += `</main>`;
             container.innerHTML = html;
-            lucide.createIcons();
         }
 
         function renderStudentView(container) {
-            // Header
             let html = `
                 <header class="bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-800/50">
                     <div class="max-w-md mx-auto px-6 py-4 flex items-center justify-between">
@@ -461,7 +483,7 @@
             `;
 
             if (!state.studentData) {
-                // CALIBRATION FORM
+                // FORM
                 html += `
                     <div class="space-y-8 animate-fade-in max-w-md mx-auto">
                         <div class="text-center space-y-2">
@@ -512,7 +534,7 @@
                     </div>
                 `;
             } else {
-                // PLAN VIEW
+                // DASHBOARD
                 const s = state.studentData;
                 const allCompleted = s.plan.every(step => step.status === 'completed');
 
@@ -547,8 +569,7 @@
                 `;
 
                 s.plan.forEach((step) => {
-                    const status = step.status; // 'locked', 'active', 'pending', 'completed'
-                    
+                    const status = step.status;
                     let cardClasses = "relative overflow-hidden rounded-2xl border transition-all duration-300 p-4 ";
                     let iconBg, iconColor, icon;
                     let opacity = "opacity-100";
@@ -572,10 +593,8 @@
                         opacity = "opacity-60";
                     }
 
-                    // Format Date
                     const dateObj = new Date(step.targetDate);
                     const dateStr = dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-                    // If completed, use completed date for display or keep target? Let's keep target for planning but add visual check.
 
                     html += `
                         <div class="${cardClasses} ${opacity} flex flex-col gap-3">
@@ -594,7 +613,6 @@
                             </div>
                     `;
 
-                    // Actions
                     if (status === 'active') {
                         html += `
                             <div class="pl-16 animate-fade-in">
@@ -641,7 +659,7 @@
             container.innerHTML = html;
         }
 
-        // --- RENDER HELPERS ---
+        // Helpers
         function renderNumberInput(id, label, placeholder = "0") {
             return `
                 <div class="flex flex-col">
@@ -672,9 +690,7 @@
             `;
         }
 
-        // Start
         init();
-
     </script>
 </body>
 </html>
