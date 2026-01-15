@@ -220,7 +220,6 @@
             availableStudies: [],
             
             pendingStepId: null, // For video confirmation
-            tempBpmValue: null, // To store BPM before confirmation
             
             unsubscribeStudent: null,
             unsubscribeList: null,
@@ -369,18 +368,17 @@
                     id: 'step-zero',
                     status: 'active',
                     label: 'Calibration : Point Zéro',
-                    description: 'Quel est votre tempo de confort absolu (100% propre) ? Entrez le BPM et envoyez la vidéo.',
+                    description: 'Quel est votre tempo de confort absolu (100% propre) ? Envoyez votre vidéo pour établir le Point Zéro.',
                     targetDate: startDate.toISOString(),
-                    completedDate: null,
-                    requiresBpm: true // Flag to show input
+                    completedDate: null
                 });
 
                 const studentPayload = {
                     name,
                     study,
                     segment: `Mesure ${measureStart} (t.${beatStart}) à Mesure ${measureEnd} (t.${beatEnd})`,
-                    bpmZero: null, // Will be filled later
-                    bpmRupture: null, // Will be filled later
+                    bpmZero: null, // Will be filled later by Admin
+                    bpmRupture: null, // Will be filled later by Admin
                     plan: newPlan,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
@@ -418,19 +416,7 @@
 
         // --- VIDEO CONFIRMATION LOGIC ---
 
-        window.openVideoConfirmation = (stepId, requiresBpm) => {
-            // Check BPM if required
-            if (requiresBpm) {
-                const bpmInput = document.getElementById(`bpm-input-${stepId}`);
-                if (!bpmInput || !bpmInput.value) {
-                    alert("Veuillez entrer le BPM validé dans la vidéo.");
-                    return;
-                }
-                state.tempBpmValue = parseInt(bpmInput.value);
-            } else {
-                state.tempBpmValue = null;
-            }
-
+        window.openVideoConfirmation = (stepId) => {
             state.pendingStepId = stepId;
             const modal = document.getElementById('video-modal');
             modal.classList.remove('hidden');
@@ -444,7 +430,6 @@
         window.closeVideoModal = () => {
             document.getElementById('video-modal').classList.add('hidden');
             state.pendingStepId = null;
-            state.tempBpmValue = null;
         };
 
         window.checkModalValidity = () => {
@@ -457,29 +442,17 @@
             if (!state.pendingStepId || !state.studentData) return;
             
             const stepId = state.pendingStepId;
-            const updates = {};
-            
-            // If this step captured a BPM, save it to root level too
-            if (stepId === 'step-zero' && state.tempBpmValue) {
-                updates.bpmZero = state.tempBpmValue;
-            } else if (stepId === 'step-rupture' && state.tempBpmValue) {
-                updates.bpmRupture = state.tempBpmValue;
-            }
-
             const updatedPlan = state.studentData.plan.map(step => {
                 if (step.id === stepId) {
-                    const newStep = { ...step, status: 'pending' };
-                    // Save BPM inside step too for display
-                    if (state.tempBpmValue) newStep.bpm = state.tempBpmValue;
-                    return newStep;
+                    return { ...step, status: 'pending' };
                 }
                 return step;
             });
 
-            updates.plan = updatedPlan;
-            updates.lastUpdated = firebase.firestore.FieldValue.serverTimestamp();
-
-            await db.collection("students").doc(state.studentData.id).update(updates);
+            await db.collection("students").doc(state.studentData.id).update({
+                plan: updatedPlan,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            });
 
             closeVideoModal();
         };
@@ -493,6 +466,26 @@
             if (!student) return;
 
             const currentStep = student.plan[stepIndex];
+            
+            // --- BPM INPUT HANDLING ---
+            let adminBpm = null;
+            if (currentStep.id === 'step-zero' || currentStep.id === 'step-rupture') {
+                 // Try Dashboard Input
+                 let input = document.getElementById(`admin-bpm-dashboard-${studentId}`);
+                 // Try Profile Input
+                 if (!input) input = document.getElementById(`admin-bpm-profile-${studentId}`);
+                 
+                 if (input && input.value) {
+                     adminBpm = parseInt(input.value);
+                 } else {
+                     // Fallback Prompt if input not found (safety)
+                     const val = prompt(`Validation ${currentStep.label}.\nEntrez le BPM validé manuellement :`);
+                     if (!val) return;
+                     adminBpm = parseInt(val);
+                 }
+            }
+            // --------------------------
+
             const updatedPlan = [...student.plan];
             
             // Mark current as completed
@@ -501,22 +494,35 @@
                 status: 'completed',
                 completedDate: new Date().toISOString()
             };
+            
+            // Save validated BPM to the step history
+            if (adminBpm) {
+                updatedPlan[stepIndex].bpm = adminBpm;
+            }
+
+            const updates = {
+                plan: updatedPlan,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            };
 
             // LOGIC FOR NEXT STEPS
             if (currentStep.id === 'step-zero') {
-                // If we just validated Point Zero, add Point Rupture step
+                updates.bpmZero = adminBpm; // Save root BPM ZERO
+
+                // Add next step (Rupture)
                 updatedPlan.push({
                     id: 'step-rupture',
                     status: 'active',
                     label: 'Calibration : Point Rupture',
-                    description: `Monter le tempo jusqu'à la limite (80% propre). Entrez le BPM et envoyez la vidéo.`,
-                    targetDate: new Date().toISOString(),
-                    requiresBpm: true
+                    description: `Monter le tempo jusqu'à la limite (80% propre). Envoyez la vidéo pour validation.`,
+                    targetDate: new Date().toISOString()
                 });
+
             } else if (currentStep.id === 'step-rupture') {
-                // If we just validated Rupture, CALCULATE THE PLAN
-                const zero = student.bpmZero;
-                const rupture = student.bpmRupture || currentStep.bpm; // Fallback if needed
+                updates.bpmRupture = adminBpm; // Save root BPM RUPTURE
+                
+                const zero = student.bpmZero; // Read existing zero
+                const rupture = adminBpm; // Use currently validated rupture
 
                 if (zero && rupture && rupture > zero) {
                     const gap = rupture - zero;
@@ -562,10 +568,7 @@
                 }
             }
 
-            await db.collection("students").doc(studentId).update({
-                plan: updatedPlan,
-                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            });
+            await db.collection("students").doc(studentId).update(updates);
         };
 
         // --- ADMIN SETTINGS LOGIC ---
@@ -896,20 +899,9 @@
 
                 // ACTIONS
                 if (status === 'active' && isOwner) {
-                    html += `<div class="pl-16 animate-fade-in space-y-3">`;
-                    
-                    // Show Input if step requires BPM
-                    if (step.requiresBpm) {
-                        html += `
-                            <div>
-                                <input type="number" id="bpm-input-${step.id}" placeholder="Votre BPM validé" 
-                                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-center focus:border-gold-500 focus:outline-none placeholder-slate-600 mb-2">
-                            </div>
-                        `;
-                    }
-
                     html += `
-                            <button onclick="openVideoConfirmation('${step.id}', ${step.requiresBpm ? 'true' : 'false'})" 
+                        <div class="pl-16 animate-fade-in space-y-3">
+                            <button onclick="openVideoConfirmation('${step.id}')" 
                                class="w-full bg-slate-200 hover:bg-white text-slate-900 font-bold py-3 rounded-xl text-center shadow-lg shadow-green-500/50 flex items-center justify-center gap-2 transition-transform active:scale-95 touch-target animate-glow-green">
                                 <i data-lucide="check-circle" class="w-5 h-5"></i>
                                 J'ai envoyé la vidéo
@@ -917,15 +909,23 @@
                         </div>
                     `;
                 } else if (status === 'pending') {
+                     // PENDING STATE
                      html += `
                         <div class="pl-16">
                             <div class="w-full bg-yellow-500/10 border border-yellow-500/40 text-yellow-500 font-bold py-3 rounded-xl text-center flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(234,179,8,0.2)]">
                                 <i data-lucide="hourglass" class="w-5 h-5"></i>
                                 En attente du retour...
                             </div>
+                            
                             ${state.isAdmin ? `
-                                <div class="mt-2 flex gap-2">
-                                    <button onclick="adminValidateStep('${s.id}', ${index})" class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2">
+                                <div class="mt-4 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                                    ${(step.id === 'step-zero' || step.id === 'step-rupture') ? `
+                                        <div class="mb-3">
+                                            <label class="text-[10px] uppercase text-slate-400 font-bold block mb-1">BPM Validé (Instructeur)</label>
+                                            <input type="number" id="admin-bpm-profile-${s.id}" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:border-gold-500 outline-none" placeholder="Ex: 80">
+                                        </div>
+                                    ` : ''}
+                                    <button onclick="adminValidateStep('${s.id}', ${index})" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2">
                                         <i data-lucide="shield-check" class="w-4 h-4"></i> Valider
                                     </button>
                                 </div>
@@ -968,6 +968,9 @@
                         const currentStep = currentStepIndex >= 0 ? s.plan[currentStepIndex] : null;
                         const pendingAction = s.plan.some(p => p.status === 'pending');
                         const finished = s.plan.every(p => p.status === 'completed');
+                        
+                        // Check if current pending step needs BPM input
+                        const isCalibration = currentStep && (currentStep.id === 'step-zero' || currentStep.id === 'step-rupture');
 
                         html += `
                             <div class="bg-slate-800 rounded-xl p-4 border ${pendingAction ? 'border-yellow-500/50' : 'border-slate-700'} relative group">
@@ -997,6 +1000,14 @@
                                                 <div class="text-slate-400 text-xs uppercase mb-1">Étape Actuelle</div>
                                                 <div class="font-medium text-white mb-2">${currentStep.label} ${currentStep.bpm ? `(${currentStep.bpm} BPM)` : ''}</div>
                                                 ${currentStep.status === 'pending' ? `
+                                                    
+                                                    ${isCalibration ? `
+                                                        <div class="mb-2">
+                                                            <label class="text-[10px] uppercase text-slate-400 font-bold">BPM Validé</label>
+                                                            <input type="number" id="admin-bpm-dashboard-${s.id}" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-sm focus:border-gold-500 outline-none" placeholder="Ex: 80">
+                                                        </div>
+                                                    ` : ''}
+
                                                     <button onclick="adminValidateStep('${s.id}', ${currentStepIndex})" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2">
                                                         <i data-lucide="check-circle" class="w-4 h-4"></i> Valider et débloquer
                                                     </button>
